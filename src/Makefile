@@ -9,7 +9,7 @@
 
 MMCU=attiny45
 DEVICE=t45
-AVRDUDE = avrdude -c avrusb500 -p $(DEVICE)
+AVRDUDE = avrdude -c usbtiny -p $(DEVICE)
 # The two lines above are for "avrdude" and the STK500 programmer connected
 # to an USB to serial converter to a Mac running Mac OS X.
 # Choose your favorite programmer and interface.
