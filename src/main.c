@@ -20,13 +20,13 @@
 #include "oddebug.h"
 
 /*
-Pin assignment:
-PB1 = measurement trigger
-PB3 = pulse width input
-PB4 = LED output (active high)
+   Pin assignment:
+   PB1 = measurement trigger
+   PB3 = pulse width input
+   PB4 = LED output (active high)
 
-PB0, PB2 = USB data lines
-*/
+   PB0, PB2 = USB data lines
+   */
 
 #define BIT_LED 4
 #define BIT_TRIG 1
@@ -46,7 +46,9 @@ PB0, PB2 = USB data lines
 static uchar    reportBuffer[2];    /* buffer for HID reports */
 static uchar    idleRate;           /* in 4 ms units */
 
-PROGMEM char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] = { 
+static uchar    adcPending;
+
+const PROGMEM char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] = {
     0x05, 0x01,                    // USAGE_PAGE (Generic Desktop)
     0x15, 0x00,                    // LOGICAL_MINIMUM (0)
     0x09, 0x04,                    // USAGE (Joystick)
@@ -80,52 +82,23 @@ static void buildReport(unsigned int value)
     reportBuffer[1] = (uchar)(value >> 8);
 }
 
-/*
- * measures the time it takes for an echo to return.
- * conversion factor: 0.1728 m/ms
- * 7ms = 57750 clock tics (at 8.25 MHz)
- * we'll just wait 65536 clock tics (~ 8ms)
- */
-unsigned int getdistance()
+static unsigned int adcPoll(void)
 {
-	unsigned long int distance = 0;
-	unsigned int overflow_count = 0;
-	static unsigned int measurements[FILTERLENGTH];
-	static unsigned int current_index = 0;
-	static unsigned int last_measurement = 0;
-	unsigned int current_measurement;
-	int i;
+    if(adcPending && !(ADCSRA & (1 << ADSC))){
+        adcPending = 0;
+        return ADC;
+    }
+    if(!adcPending) {
+        adcPending = 1;
+        ADCSRA |= (1 << ADSC);  /* start conversion */
+    }
+    return 0;
+}
 
-	PORTB |= 1 << BIT_TRIG; /* trigger the measurement */
-	while(!(PINB & (1 << BIT_PW))) {} /* wait until the PW pin goes high */
-	TCNT1 = 0; /* reset counter */
-	TIFR = (1 << TOV1); /* clear overflow if set */
-	PORTB &= ~(1 << BIT_TRIG); /* bring the trigger pin low again */
-	do
-	{
-		if(TIFR & (1 << TOV1))
-		{
-			TIFR = (1 << TOV1); /* clear overflow */
-			overflow_count++;
-		}
-	} while(overflow_count <= 255 && (PINB & (1 << BIT_PW)));
-	current_measurement = (256 * overflow_count + TCNT1);
-
-	/* get rid of single-sample outliers or timed-out samples */
-	if(abs(current_measurement - last_measurement) < JUMP_THRESH && overflow_count < 250)
-	{
-		measurements[current_index] = current_measurement;
-		current_index = (current_index + 1) % FILTERLENGTH;
-
-		/* moving average filter */
-		for(i = 0; i < FILTERLENGTH; i++)
-			distance += measurements[i];
-		distance /= FILTERLENGTH;
-	}
-	else
-		distance = 0;
-	last_measurement = current_measurement;
-	return distance;
+static void adcInit(void)
+{
+    ADMUX = UTIL_BIN8(1001, 0011);  /* Vref=2.56V, measure ADC0 */
+    ADCSRA = UTIL_BIN8(1000, 0111); /* enable ADC, not free running, interrupt disable, rate = 1/128 */
 }
 
 
@@ -140,32 +113,32 @@ static void timerInit(void)
 
 uchar	usbFunctionSetup(uchar data[8])
 {
-usbRequest_t    *rq = (void *)data;
+    usbRequest_t    *rq = (void *)data;
 
     usbMsgPtr = reportBuffer;
     if((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS)
-	{    /* class request type */
+    {    /* class request type */
         if(rq->bRequest == USBRQ_HID_GET_REPORT)
-		{  /* wValue: ReportType (highbyte), ReportID (lowbyte) */
+        {  /* wValue: ReportType (highbyte), ReportID (lowbyte) */
             /* we only have one report type, so don't look at wValue */
             buildReport(0);
             return sizeof(reportBuffer);
         }
-		else if(rq->bRequest == USBRQ_HID_GET_IDLE)
-		{
+        else if(rq->bRequest == USBRQ_HID_GET_IDLE)
+        {
             usbMsgPtr = &idleRate;
             return 1;
         }
-		else if(rq->bRequest == USBRQ_HID_SET_IDLE)
-		{
+        else if(rq->bRequest == USBRQ_HID_SET_IDLE)
+        {
             idleRate = rq->wValue.bytes[1];
         }
     }
-	else
-	{
+    else
+    {
         /* no vendor specific requests implemented */
     }
-	return 0;
+    return 0;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -174,35 +147,36 @@ usbRequest_t    *rq = (void *)data;
 
 int main(void)
 {
-int i;
-int valPending = 0;
-unsigned int distance = 0;
+    int i;
+    int valPending = 0;
+    unsigned int distance = 341;
+    adcPending = 0;
 
-/* Calibrate the RC oscillator to 8.25 MHz. The core clock of 16.5 MHz is
- * derived from the 66 MHz peripheral clock by dividing. We assume that the
- * EEPROM contains a calibration value in location 0. If no calibration value
- * has been stored during programming, we offset Atmel's 8 MHz calibration
- * value according to the clock vs OSCCAL diagram in the data sheet. This
- * seems to be sufficiently precise (<= 1%).
- */
+    /* Calibrate the RC oscillator to 8.25 MHz. The core clock of 16.5 MHz is
+     * derived from the 66 MHz peripheral clock by dividing. We assume that the
+     * EEPROM contains a calibration value in location 0. If no calibration value
+     * has been stored during programming, we offset Atmel's 8 MHz calibration
+     * value according to the clock vs OSCCAL diagram in the data sheet. This
+     * seems to be sufficiently precise (<= 1%).
+     */
     uchar calibrationValue = eeprom_read_byte(0);
     if(calibrationValue != 0xff)
-	{
+    {
         OSCCAL = calibrationValue;  /* a calibration value is supplied */
     }
-	else
-	{
+    else
+    {
         /* we have no calibration value, assume 8 MHz calibration and adjust from there */
         if(OSCCAL < 125)
-		{
+        {
             OSCCAL += 3;    /* should be 3.5 */
         }
-		else if(OSCCAL >= 128)
-		{
+        else if(OSCCAL >= 128)
+        {
             OSCCAL += 7;    /* should be 7 */
         }
-		else
-		{  /* must be between 125 and 128 */
+        else
+        {  /* must be between 125 and 128 */
             OSCCAL = 127;   /* maximum possible avoiding discontinuity */
         }
     }
@@ -210,36 +184,38 @@ unsigned int distance = 0;
     DDRB = (1 << USB_CFG_DMINUS_BIT) | (1 << USB_CFG_DPLUS_BIT);
     PORTB = 0;          /* indicate USB disconnect to host */
     for(i=0;i<20;i++)
-	{  /* 300 ms disconnect, also allows our oscillator to stabilize */
+    {  /* 300 ms disconnect, also allows our oscillator to stabilize */
         _delay_ms(15);
     }
     DDRB = 1 << BIT_LED | 1 << BIT_TRIG;    /* output for LED and measurement trigger */
     wdt_enable(WDTO_1S);
     timerInit();
+    adcInit();
     usbInit();
     sei();
     while(1)
-	{    /* main event loop */
+    {    /* main event loop */
         wdt_reset();
         usbPoll();
-		/* if a new value is ready and the last value was sent */
-        if(valPending && usbInterruptIsReady()) 
-		{
-			buildReport(distance);
+        /* if a new value is ready and the last value was sent */
+        if(valPending && usbInterruptIsReady())
+        {
+            buildReport(distance);
             usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
-			valPending = 0;
-			PORTB &= ~(1 << BIT_LED);   /* turn off LED */
+            valPending = 0;
+            PORTB &= ~(1 << BIT_LED);   /* turn off LED */
         }
-		/* if the last measurement has been handed to the USB driver */
-		if(!valPending)
-		{
-			distance = getdistance();
-			if(distance) /* distance returns 0 for outliers */
-			{
-				PORTB |= 1 << BIT_LED;   /* turn on LED */
-				valPending = 1;
-			}
-		}
+        /* if the last measurement has been handed to the USB driver */
+        if(!valPending)
+        {
+            distance = adcPoll();
+
+            if(distance) /* distance returns 0 for outliers */
+            {
+                PORTB |= 1 << BIT_LED;   /* turn on LED */
+                valPending = 1;
+            }
+        }
     }
     return 0;
 }
