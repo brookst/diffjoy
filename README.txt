@@ -1,10 +1,10 @@
-AetherSense README
+DiffJoy README
 ==================
 
 Description
 -----------
 
-The AetherSense is a one-axis, no button, USB HID ultrasonic distance sensing joystick based around an Atmel AVR ATTiny45 microcontroller, a MaxBotix LV-MaxSonar-EZ4 and the Object Development AVR-USB firmware driver.  The code for the AetherSense is licensed under the GNU GPLv2.  You can get more info in LICENSE.txt
+The DiffJoy is a one-axis, USB HID joystick based around an Atmel AVR ATTiny45 microcontroller and the Object Development AVR-USB firmware driver.  The code for the DiffJoy is licensed under the GNU GPLv2.  You can get more info in LICENSE.txt
 
 Installation Instructions
 -------------------------
@@ -22,6 +22,5 @@ Files
 
 LICENSE.txt - GNU G
 README.txt - This file
-schematic.png - Build your own!
-src - our source
+src - source
 src/usbdrv - the AVR-USB driver.  More info here: http://www.obdev.at/avrusb/
