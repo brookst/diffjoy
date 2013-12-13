@@ -72,9 +72,18 @@ const PROGMEM char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] 
  */
 static void buildReport(unsigned int value)
 {
-    // Output just ADC2 for now
     reportBuffer[0] = (uchar)(value & 0xFF);
     reportBuffer[1] = (uchar)(value >> 8);
+}
+
+/* ------------------------------------------------------------------------- */
+/* ----------------------------- ADC functions ----------------------------- */
+/* ------------------------------------------------------------------------- */
+
+static void adcInit(void)
+{
+    ADMUX = ADC_0;                  /* Vref=Vcc, measure ADC3 */
+    ADCSRA = UTIL_BIN8(1000, 0111); /* enable ADC, not free running, interrupt disable, rate = 1/128 */
 }
 
 void adcPoll(void)
@@ -84,32 +93,20 @@ void adcPoll(void)
         adc_value[adcPending] = ADC; // Read ADC value into buffer
         if(adcPending == 0){         // Read next channel
             ADMUX = ADC_1;           // Switch to channel 1
-            _delay_ms(1);
-            ADCSRA |= (1 << ADSC);   /* start conversion */
+            _delay_ms(1);            // FIXME: Delay for ADC_1 read
+            ADCSRA |= (1 << ADSC);   // Start conversion
         } else {
-            usbPending = 1;          // Flag a waiting value
+            usbPending = 1;          // Both values read, flag for a USB report
         }
-        adcPending++;
+        adcPending++;                // Flag next ADC or all ADCs Read
     }
     if(adcPending >= 2) {
-        if(!usbPending) {
+        if(!usbPending) {            // Wait for last USB report to send
             ADMUX = ADC_0;           // Switch to channel 0
-            ADCSRA |= (1 << ADSC);   /* start conversion */
-            adcPending = 0;
+            ADCSRA |= (1 << ADSC);
+            adcPending = 0;          // Flag waiting for ADC_0
         }
     }
-}
-
-static void adcInit(void)
-{
-    ADMUX = ADC_0;                  /* Vref=Vcc, measure ADC3 */
-    ADCSRA = UTIL_BIN8(1000, 0111); /* enable ADC, not free running, interrupt disable, rate = 1/128 */
-}
-
-
-static void timerInit(void)
-{
-    TCCR1 = UTIL_BIN8(0000, 0010);            /* timer clock = clock/2, 8.25MHz*/
 }
 
 /* ------------------------------------------------------------------------- */
@@ -194,9 +191,8 @@ int main(void)
     {  /* 300 ms disconnect, also allows our oscillator to stabilize */
         _delay_ms(15);
     }
-    DDRB = 1 << BIT_LED;    /* output for LED and measurement trigger */
+    DDRB = 1 << BIT_LED;    /* output for LED */
     wdt_enable(WDTO_1S);
-//    timerInit();
     adcInit();
     usbInit();
     sei();
@@ -205,20 +201,18 @@ int main(void)
         wdt_reset();
         usbPoll();
         /* if a new value is ready and the last value was sent */
-        if(usbPending && usbInterruptIsReady())
-        {
-            buildReport(adc_value[0]);
+        if(usbPending && usbInterruptIsReady()) {
+            buildReport(adc_value[0]);    // FIXME: Output just ADC2 for now
             usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
             usbPending = 0;
         }
         /* if the last measurement has been handed to the USB driver */
-        if(!usbPending)
-        {
+        if(!usbPending) {
             adcPoll();
-            if(adc_value[1] == 0) {
-                PORTB |= 1 << BIT_LED;   /* turn on LED */
+            if(adc_value[1] == 0) {       // FIXME: Check if ADC2 is locked to 0
+                PORTB |= 1 << BIT_LED;    /* turn on LED */
             } else {
-                PORTB &= ~(1 << BIT_LED);   /* turn off LED */
+                PORTB &= ~(1 << BIT_LED); /* turn off LED */
             }
         }
     }
