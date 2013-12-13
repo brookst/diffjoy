@@ -1,11 +1,10 @@
 /*************************************************************************
  * main.c
- * aethersense firmware
- * the aethersense is a 1-axis distance sensor that acts
- * as an HID joystick
- * Author: Spencer Russell, based on work by Christian Starkjohann
- * Copyright: (c) 2006 by OBJECTIVE DEVELOPMENT Software GmbH
- * License: Proprietary, free under certain conditions. See Documentation.
+ * diffjoy firmware
+ * the diffjoy is a 1-axis HID joystick which is the differential of two
+ * analog inputs
+ * Author: Tim Brooks
+ * based on work by Spencer Russell and Christian Starkjohann
  * ***********************************************************************/
 
 #include <avr/io.h>
@@ -21,32 +20,28 @@
 
 /*
    Pin assignment:
-   PB1 = measurement trigger
-   PB3 = pulse width input
-   PB4 = LED output (active high)
+   PB1 = LED output (active high)
+
+   PB3 = First analog input
+   PB4 = Second analog input
 
    PB0, PB2 = USB data lines
    */
 
-#define BIT_LED 4
-#define BIT_TRIG 1
-#define BIT_PW 3
-
-#define FILTERLENGTH 2 /* length of the moving-average filter */
-#define JUMP_THRESH 8000
+#define BIT_LED 1
+#define ADC_0 3
+#define ADC_1 2
 
 #define UTIL_BIN4(x)        (uchar)((0##x & 01000)/64 + (0##x & 0100)/16 + (0##x & 010)/4 + (0##x & 1))
 #define UTIL_BIN8(hi, lo)   (uchar)(UTIL_BIN4(hi) * 16 + UTIL_BIN4(lo))
 
-#ifndef NULL
-#define NULL    ((void *)0)
-#endif
-
-
 static uchar    reportBuffer[2];    /* buffer for HID reports */
 static uchar    idleRate;           /* in 4 ms units */
 
-static uchar    adcPending;
+static unsigned int adcPrevious;
+static unsigned int adcPending;
+static unsigned int usbPending;
+static unsigned int adc_value[2];
 
 const PROGMEM char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] = {
     0x05, 0x01,                    // USAGE_PAGE (Generic Desktop)
@@ -66,7 +61,6 @@ const PROGMEM char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] 
     0xc0                           // END_COLLECTION
 };
 
-
 /*
  * Report Format:
  *
@@ -78,26 +72,37 @@ const PROGMEM char usbHidReportDescriptor[USB_CFG_HID_REPORT_DESCRIPTOR_LENGTH] 
  */
 static void buildReport(unsigned int value)
 {
+    // Output just ADC2 for now
     reportBuffer[0] = (uchar)(value & 0xFF);
     reportBuffer[1] = (uchar)(value >> 8);
 }
 
-static unsigned int adcPoll(void)
+void adcPoll(void)
 {
-    if(adcPending && !(ADCSRA & (1 << ADSC))){
-        adcPending = 0;
-        return ADC;
+    // If conversion is finished and we have values to collect
+    if(!(ADCSRA & (1 << ADSC)) && (adcPending < 2)) {
+        adc_value[adcPending] = ADC; // Read ADC value into buffer
+        if(adcPending == 0){         // Read next channel
+            ADMUX = ADC_1;           // Switch to channel 1
+            _delay_ms(1);
+            ADCSRA |= (1 << ADSC);   /* start conversion */
+        } else {
+            usbPending = 1;          // Flag a waiting value
+        }
+        adcPending++;
     }
-    if(!adcPending) {
-        adcPending = 1;
-        ADCSRA |= (1 << ADSC);  /* start conversion */
+    if(adcPending >= 2) {
+        if(!usbPending) {
+            ADMUX = ADC_0;           // Switch to channel 0
+            ADCSRA |= (1 << ADSC);   /* start conversion */
+            adcPending = 0;
+        }
     }
-    return 0;
 }
 
 static void adcInit(void)
 {
-    ADMUX = UTIL_BIN8(1001, 0011);  /* Vref=2.56V, measure ADC0 */
+    ADMUX = ADC_0;                  /* Vref=Vcc, measure ADC3 */
     ADCSRA = UTIL_BIN8(1000, 0111); /* enable ADC, not free running, interrupt disable, rate = 1/128 */
 }
 
@@ -111,7 +116,7 @@ static void timerInit(void)
 /* ------------------------ interface to USB driver ------------------------ */
 /* ------------------------------------------------------------------------- */
 
-uchar	usbFunctionSetup(uchar data[8])
+uchar usbFunctionSetup(uchar data[8])
 {
     usbRequest_t    *rq = (void *)data;
 
@@ -147,10 +152,11 @@ uchar	usbFunctionSetup(uchar data[8])
 
 int main(void)
 {
-    int i;
-    int valPending = 0;
-    unsigned int distance = 341;
+    usbPending = 0;
     adcPending = 0;
+    adcPrevious = 0;
+    adc_value[0] = 0;
+    adc_value[1] = 0;
 
     /* Calibrate the RC oscillator to 8.25 MHz. The core clock of 16.5 MHz is
      * derived from the 66 MHz peripheral clock by dividing. We assume that the
@@ -183,37 +189,36 @@ int main(void)
     odDebugInit();
     DDRB = (1 << USB_CFG_DMINUS_BIT) | (1 << USB_CFG_DPLUS_BIT);
     PORTB = 0;          /* indicate USB disconnect to host */
+    int i;
     for(i=0;i<20;i++)
     {  /* 300 ms disconnect, also allows our oscillator to stabilize */
         _delay_ms(15);
     }
-    DDRB = 1 << BIT_LED | 1 << BIT_TRIG;    /* output for LED and measurement trigger */
+    DDRB = 1 << BIT_LED;    /* output for LED and measurement trigger */
     wdt_enable(WDTO_1S);
-    timerInit();
+//    timerInit();
     adcInit();
     usbInit();
     sei();
-    while(1)
-    {    /* main event loop */
+
+    while(1) {    /* main event loop */
         wdt_reset();
         usbPoll();
         /* if a new value is ready and the last value was sent */
-        if(valPending && usbInterruptIsReady())
+        if(usbPending && usbInterruptIsReady())
         {
-            buildReport(distance);
+            buildReport(adc_value[0]);
             usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
-            valPending = 0;
-            PORTB &= ~(1 << BIT_LED);   /* turn off LED */
+            usbPending = 0;
         }
         /* if the last measurement has been handed to the USB driver */
-        if(!valPending)
+        if(!usbPending)
         {
-            distance = adcPoll();
-
-            if(distance) /* distance returns 0 for outliers */
-            {
+            adcPoll();
+            if(adc_value[1] == 0) {
                 PORTB |= 1 << BIT_LED;   /* turn on LED */
-                valPending = 1;
+            } else {
+                PORTB &= ~(1 << BIT_LED);   /* turn off LED */
             }
         }
     }
