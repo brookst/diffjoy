@@ -192,6 +192,7 @@ int main(void)
         _delay_ms(15);
     }
     DDRB = 1 << BIT_LED;    /* output for LED */
+    DIDR0 |= (1 << ADC2D) | (1 << ADC3D); // Disable digital buffers on ADC inputs
     wdt_enable(WDTO_1S);
     adcInit();
     usbInit();
@@ -202,7 +203,7 @@ int main(void)
         usbPoll();
         /* if a new value is ready and the last value was sent */
         if(usbPending && usbInterruptIsReady()) {
-            buildReport(adc_value[0]);    // FIXME: Output just ADC2 for now
+            buildReport(adc_value[1]);    // FIXME: Output just ADC2 for now
             usbSetInterrupt(reportBuffer, sizeof(reportBuffer));
             usbPending = 0;
         }
