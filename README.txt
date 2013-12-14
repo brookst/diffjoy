@@ -23,4 +23,4 @@ Files
 LICENSE.txt - GNU G
 README.txt - This file
 src - source
-src/usbdrv - the AVR-USB driver.  More info here: http://www.obdev.at/avrusb/
+src/usbdrv - the V-USB driver.  More info here: http://www.obdev.at/products/vusb
