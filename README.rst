@@ -9,18 +9,18 @@ The DiffJoy is a one-axis, USB HID joystick based around an Atmel AVR ATTiny45 m
 Installation Instructions
 -------------------------
 
-With avr-gcc installed in the src directory, type
+With avr-gcc installed, in the src directory type::
 
 $ make
 
-To flash a chip with AVRDUDE, type 
+To flash a chip with AVRDUDE, type::
 
 $ make fuse && make flash
 
 Files
 -----
 
-  * LICENSE.txt - GNU G
-  * README.txt - This file
-  * src - source
-  * src/usbdrv - the V-USB driver. More info here: http://www.obdev.at/products/vusb
+* LICENSE.txt - GNU GPLv2
+* README.rst - this file
+* src - project source
+* src/usbdrv - the V-USB driver: http://www.obdev.at/products/vusb
