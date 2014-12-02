@@ -20,7 +20,7 @@ $ make fuse && make flash
 Files
 -----
 
-LICENSE.txt - GNU G
-README.txt - This file
-src - source
-src/usbdrv - the V-USB driver.  More info here: http://www.obdev.at/products/vusb
+  * LICENSE.txt - GNU G
+  * README.txt - This file
+  * src - source
+  * src/usbdrv - the V-USB driver. More info here: http://www.obdev.at/products/vusb
