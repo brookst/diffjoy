@@ -1,3 +1,5 @@
+-D__AVR_ATtiny45__
+-Os
 -Isrc
 -Isrc/usbdrv
 -I/usr/lib/avr/include
