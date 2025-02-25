@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "pedal-controller"
+version = "0.1.0"
+description = "Map diffjoy pedal controller positions to keypresses"
+authors = ["Timothy Brooks <brooks@skoorb.net>"]
+readme = "README.rst"
+license = "GPLv2"
+packages = [
+  { include = "pedal_controller" }
+]
+
+[tool.poetry.scripts]
+pedal-controller = "pedal_controller.__main__:main"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+keyboard = "^0.13.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
